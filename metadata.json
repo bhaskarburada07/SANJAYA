@@ -1,0 +1,12 @@
+{
+  "name": "SANJAYA",
+  "description": "Privacy-first AI home safety and visitor-awareness platform. Know who's there. Stay in control.",
+  "requestFramePermissions": [
+    "geolocation",
+    "microphone",
+    "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

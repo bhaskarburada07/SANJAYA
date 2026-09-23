@@ -21,6 +21,7 @@ import {
   AIConversationMessage,
   SecurityEvent,
   EmergencyEscalationSession,
+  DecisionPipelineExecution,
 } from '../types';
 import {
   INITIAL_CAMERAS,
@@ -34,7 +35,7 @@ import {
   INITIAL_DAILY_BRIEF,
   INITIAL_DEVICE_HEALTH,
 } from '../services/mockData';
-import { realtimeBus } from '../lib/supabase';
+import { supabase, realtimeBus } from '../lib/supabase';
 import { CVSimulatorService } from '../services/cvSimulator';
 import { SosEscalationService } from '../services/sosService';
 import { EmergencyEscalationService } from '../services/emergencyEscalationService';
@@ -44,6 +45,9 @@ import { trustedPeopleService } from '../services/trustedPeopleService';
 import { AIBrainManager } from '../services/aiBrainManager';
 import { SanjayaAIService } from '../services/sanjayaAIService';
 import { SecurityHardwareAdapter, RawHardwarePayload } from '../services/hardwareAbstraction';
+import { CameraObstructionService } from '../services/cameraObstructionService';
+import { SanjayaDecisionSystem } from '../services/decisionSystem';
+
 
 export interface ActiveAlertModalState {
   type: 'known' | 'unknown';
@@ -90,7 +94,7 @@ interface DataContextType {
 
   // Camera Actions
   addCamera: (camera: Omit<Camera, 'id' | 'user_id' | 'created_at'>) => void;
-  updateCamera: (id: string, updates: Partial<Camera>) => void;
+  updateCamera: (id: string, updates: Partial<Camera>) => Promise<Camera>;
   deleteCamera: (id: string) => void;
   activeCamera: Camera;
   setActiveCameraId: (id: string) => void;
@@ -160,6 +164,13 @@ interface DataContextType {
   triggerSimulatedDoorbell: () => void;
   triggerSimulatedLoitering: () => void;
   triggerSimulatedTamper: (cameraId: string) => void;
+  triggerCameraObstruction: (
+    cameraId: string,
+    obstructionType?: 'lens_covered' | 'dust_dirt' | 'physical_block' | 'spray_blur' | 'heavy_blur'
+  ) => void;
+  clearCameraObstruction: (cameraId: string) => void;
+  restoreCameraFromTamper: (cameraId: string) => void;
+  forceConfirmTampering: (cameraId: string) => void;
 
   // SANJAYA AI Brain
   aiBrainState: AIBrainState;
@@ -174,6 +185,10 @@ interface DataContextType {
   dismissAINotification: (id: string) => void;
   markAINotificationSafe: (id: string) => void;
   ingestHardwareEvent: (raw: RawHardwarePayload) => Promise<void>;
+
+  // SANJAYA Context-Aware Decision System
+  recentDecisions: DecisionPipelineExecution[];
+  runSecurityScenario: (scenarioCode: 'A' | 'B' | 'C' | 'D' | 'E' | 'F') => DecisionPipelineExecution | null;
 }
 
 const DataContext = createContext<DataContextType | undefined>(undefined);
@@ -307,6 +322,25 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       loadInitial('security_mode', 'home' as SecurityMode)
     )
   );
+
+  const [recentDecisions, setRecentDecisions] = useState<DecisionPipelineExecution[]>(() =>
+    SanjayaDecisionSystem.getRecentDecisions()
+  );
+
+  const runSecurityScenario = (scenarioCode: 'A' | 'B' | 'C' | 'D' | 'E' | 'F') => {
+    const result = CVSimulatorService.runPredefinedScenario(scenarioCode, userId, homeId, {
+      cameras,
+      zones,
+      trustedPeople,
+      sensors,
+    });
+    if (result) {
+      setRecentDecisions((prev) => [result.execution, ...prev.filter(d => d.id !== result.execution.id)].slice(0, 30));
+      return result.execution;
+    }
+    return null;
+  };
+
 
   // Sync security mode changes into AI Brain status
   useEffect(() => {
@@ -580,12 +614,17 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setActiveAlertModal(data.detection);
     });
 
+    const unsubDecision = realtimeBus.subscribe('decision:new', (exec: DecisionPipelineExecution) => {
+      setRecentDecisions((prev) => [exec, ...prev.filter((d) => d.id !== exec.id)].slice(0, 30));
+    });
+
     return () => {
       unsubDetection();
       unsubIncident();
       unsubIncidentUpdate();
       unsubNotification();
       unsubAlert();
+      unsubDecision();
     };
   }, []);
 
@@ -669,8 +708,195 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setCameras((prev) => [...prev, newCamera]);
   };
 
-  const updateCamera = (id: string, updates: Partial<Camera>) => {
-    setCameras((prev) => prev.map((c) => (c.id === id ? { ...c, ...updates } : c)));
+  const updateCamera = async (id: string, updates: Partial<Camera>): Promise<Camera> => {
+    const oldCam = cameras.find((c) => c.id === id);
+    if (!oldCam) {
+      throw new Error(`Camera with ID ${id} not found.`);
+    }
+
+    // Merge updates while strictly preserving real-time connection status
+    // unless an explicit connection toggle was performed
+    const merged: Camera = {
+      ...oldCam,
+      ...updates,
+      // Status preservation: if updates.status is not explicitly passed, retain old status
+      status: updates.status !== undefined ? updates.status : oldCam.status,
+      // Retain obstruction / tamper state unless toggled offline
+      view_status: updates.status === 'offline' ? 'normal' : (updates.view_status !== undefined ? updates.view_status : oldCam.view_status),
+      obstruction_verification: updates.status === 'offline' ? undefined : (updates.obstruction_verification !== undefined ? updates.obstruction_verification : oldCam.obstruction_verification),
+      is_tampered: updates.status === 'offline' ? false : (updates.is_tampered !== undefined ? updates.is_tampered : oldCam.is_tampered),
+      tamper_reason: updates.status === 'offline' ? undefined : (updates.tamper_reason !== undefined ? updates.tamper_reason : oldCam.tamper_reason),
+    };
+
+    // 1. Update camera list
+    setCameras((prev) => prev.map((c) => (c.id === id ? merged : c)));
+
+    const newName = updates.name?.trim();
+    const newLocation = updates.location?.trim();
+    const newZone = updates.zone?.trim() || newLocation;
+    const oldName = oldCam.name;
+    const oldLocation = oldCam.location;
+    const oldZone = oldCam.zone || oldLocation;
+
+    // 2. Sync to Detections
+    if (newName || newZone) {
+      setDetections((prev) =>
+        prev.map((d) => {
+          if (d.camera_id === id) {
+            return {
+              ...d,
+              camera_name: newName || d.camera_name,
+              zone: newZone || d.zone,
+            };
+          }
+          return d;
+        })
+      );
+    }
+
+    // 3. Sync to Incidents & Timeline
+    if (newName || newZone || newLocation) {
+      setIncidents((prev) =>
+        prev.map((inc) => {
+          if (inc.camera_id === id) {
+            const updatedTimeline = inc.timeline.map((evt) => ({
+              ...evt,
+              camera_name: newName || evt.camera_name,
+              zone: newZone || evt.zone,
+            }));
+            const matchesOldWhere = inc.where === oldLocation || inc.where === oldZone || inc.where === oldName;
+            return {
+              ...inc,
+              camera_name: newName || inc.camera_name,
+              location_zone: newZone || inc.location_zone,
+              where: matchesOldWhere ? (newLocation || newZone || inc.where) : inc.where,
+              timeline: updatedTimeline,
+            };
+          }
+          return inc;
+        })
+      );
+
+      // Also sync selectedIncident if active
+      setSelectedIncident((prev) => {
+        if (!prev || prev.camera_id !== id) return prev;
+        const matchesOldWhere = prev.where === oldLocation || prev.where === oldZone || prev.where === oldName;
+        return {
+          ...prev,
+          camera_name: newName || prev.camera_name,
+          location_zone: newZone || prev.location_zone,
+          where: matchesOldWhere ? (newLocation || newZone || prev.where) : prev.where,
+          timeline: prev.timeline.map((evt) => ({
+            ...evt,
+            camera_name: newName || evt.camera_name,
+            zone: newZone || evt.zone,
+          })),
+        };
+      });
+    }
+
+    // 4. Sync Zone relationships
+    if (newZone && newZone !== oldZone) {
+      setZones((prev) => {
+        return prev.map((z) => {
+          // Remove from old zone
+          if (z.name.toLowerCase() === oldZone.toLowerCase() || z.camera_ids.includes(id)) {
+            return {
+              ...z,
+              camera_ids: z.camera_ids.filter((cid) => cid !== id),
+            };
+          }
+          // Add to new zone if matches
+          if (z.name.toLowerCase() === newZone.toLowerCase()) {
+            return {
+              ...z,
+              camera_ids: z.camera_ids.includes(id) ? z.camera_ids : [...z.camera_ids, id],
+            };
+          }
+          return z;
+        });
+      });
+    }
+
+    // 5. Sync to Device Health
+    if (newName || newZone) {
+      setDeviceHealth((prev) =>
+        prev.map((dev) => {
+          if (dev.id === id || dev.device_name === oldName) {
+            return {
+              ...dev,
+              device_name: newName || dev.device_name,
+              zone: newZone || dev.zone,
+            };
+          }
+          return dev;
+        })
+      );
+    }
+
+    // 6. Sync Notifications
+    if (newName && oldName) {
+      setNotifications((prev) =>
+        prev.map((n) => {
+          if (n.message.includes(oldName) || n.title.includes(oldName)) {
+            return {
+              ...n,
+              title: n.title.replace(new RegExp(oldName, 'g'), newName),
+              message: n.message.replace(new RegExp(oldName, 'g'), newName),
+            };
+          }
+          return n;
+        })
+      );
+    }
+
+    // 7. Sync to AI Brain State
+    setAiBrainState((prev) => {
+      const updatedNotifications = prev.notifications.map((n) => {
+        if (newName && oldName && (n.message.includes(oldName) || n.title.includes(oldName))) {
+          return {
+            ...n,
+            title: n.title.replace(new RegExp(oldName, 'g'), newName),
+            message: n.message.replace(new RegExp(oldName, 'g'), newName),
+          };
+        }
+        return n;
+      });
+
+      const updatedBrain = {
+        ...prev,
+        notifications: updatedNotifications,
+      };
+      AIBrainManager.saveState(userId, homeId, updatedBrain);
+      return updatedBrain;
+    });
+
+    // 8. Publish Realtime update
+    realtimeBus.publish('camera:update', { id, camera: merged });
+
+    // 9. Sync to Supabase if configured
+    if (supabase) {
+      try {
+        await supabase
+          .from('cameras')
+          .update({
+            name: merged.name,
+            location: merged.location,
+            zone: merged.zone,
+            camera_type: merged.camera_type,
+            stream_url: merged.stream_url,
+            is_simulation: merged.is_simulation,
+            brand: merged.brand,
+            connection_type: merged.connection_type,
+            description: merged.description,
+          })
+          .eq('id', id);
+      } catch (err) {
+        console.error('[DataContext] Error updating camera in Supabase:', err);
+      }
+    }
+
+    return merged;
   };
 
   const deleteCamera = (id: string) => {
@@ -678,6 +904,20 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (activeCameraId === id && cameras.length > 1) {
       const next = cameras.find((c) => c.id !== id);
       if (next) setActiveCameraId(next.id);
+    }
+    // Remove from zones
+    setZones((prev) =>
+      prev.map((z) => ({
+        ...z,
+        camera_ids: z.camera_ids.filter((cid) => cid !== id),
+      }))
+    );
+    // Remove from deviceHealth
+    setDeviceHealth((prev) => prev.filter((d) => d.id !== id));
+    // Publish Realtime delete
+    realtimeBus.publish('camera:delete', { id });
+    if (supabase) {
+      supabase.from('cameras').delete().eq('id', id).then(() => {}, console.error);
     }
   };
 
@@ -1087,32 +1327,129 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     );
   };
 
-  const triggerSimulatedTamper = (cameraId: string) => {
+  // Continuous multi-camera obstruction verification ticker
+  useEffect(() => {
+    const hasVerifyingCamera = cameras.some(
+      (c) => c.view_status === 'possible_obstruction' && c.obstruction_verification
+    );
+    if (!hasVerifyingCamera) return;
+
+    const interval = setInterval(() => {
+      setCameras((prevCameras) => {
+        let hasChanges = false;
+        const updatedCameras = prevCameras.map((cam) => {
+          if (cam.view_status !== 'possible_obstruction' || !cam.obstruction_verification) {
+            return cam;
+          }
+
+          // 1. Camera Disconnected Check:
+          // If camera is offline/disconnected, cancel verification immediately (disconnection is not tampering!)
+          if (cam.status === 'offline') {
+            hasChanges = true;
+            return CameraObstructionService.cancelObstructionVerification(cam, 'Camera disconnected');
+          }
+
+          const expiresAt = cam.obstruction_verification.verificationExpiresAt;
+          const remaining = Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000));
+
+          if (remaining > 0) {
+            if (cam.obstruction_verification.remainingSeconds !== remaining) {
+              hasChanges = true;
+              return {
+                ...cam,
+                obstruction_verification: {
+                  ...cam.obstruction_verification,
+                  remainingSeconds: remaining,
+                },
+              };
+            }
+            return cam;
+          }
+
+          // 2. 30 Seconds Elapsed Continuously:
+          // Camera is connected + obstruction remained for full 30 seconds
+          // -> Confirm tampering, create incident, publish notification
+          hasChanges = true;
+          const { camera: tamperedCam } = CameraObstructionService.confirmObstructionTampering(
+            cam,
+            userId
+          );
+          return tamperedCam;
+        });
+
+        return hasChanges ? updatedCameras : prevCameras;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [cameras, userId]);
+
+  /**
+   * Starts a 30-second verification process on a specific camera.
+   * Multi-camera behavior: other cameras remain normal and unaffected.
+   */
+  const triggerCameraObstruction = (
+    cameraId: string,
+    obstructionType: 'lens_covered' | 'dust_dirt' | 'physical_block' | 'spray_blur' | 'heavy_blur' = 'lens_covered'
+  ) => {
     setCameras((prev) =>
       prev.map((c) => {
         if (c.id === cameraId) {
-          return {
-            ...c,
-            status: 'tampered',
-            is_tampered: true,
-            tamper_reason: 'Sudden optical occlusion & tilt sensor shift detected',
-          };
+          return CameraObstructionService.startObstructionVerification(c, obstructionType);
         }
         return c;
       })
     );
+  };
 
-    const notif: AppNotification = {
-      id: `notif-tamper-${Date.now()}`,
-      user_id: userId,
-      type: 'emergency',
-      category: 'emergency',
-      title: '🚨 Camera Tamper Alert',
-      message: `${activeCamera.name} detected physical tilt/lens cover tampering. Verify immediately.`,
-      read: false,
-      created_at: new Date().toISOString(),
-    };
-    realtimeBus.publish('notifications:new', notif);
+  /**
+   * Called if obstruction disappears within 30 seconds:
+   * Cancels timer, marks camera as normal, NO notification, NO incident!
+   */
+  const clearCameraObstruction = (cameraId: string) => {
+    setCameras((prev) =>
+      prev.map((c) => {
+        if (c.id === cameraId) {
+          return CameraObstructionService.cancelObstructionVerification(c);
+        }
+        return c;
+      })
+    );
+  };
+
+  /**
+   * Restores a camera that was previously confirmed tampered back to normal online state.
+   */
+  const restoreCameraFromTamper = (cameraId: string) => {
+    setCameras((prev) =>
+      prev.map((c) => {
+        if (c.id === cameraId) {
+          return CameraObstructionService.restoreCamera(c);
+        }
+        return c;
+      })
+    );
+  };
+
+  /**
+   * Fast-forward / force confirm tampering for quick testing without waiting 30 seconds.
+   */
+  const forceConfirmTampering = (cameraId: string) => {
+    const cam = cameras.find((c) => c.id === cameraId);
+    if (!cam || cam.status === 'offline') return;
+    const { camera: tamperedCam } = CameraObstructionService.confirmObstructionTampering(
+      cam,
+      userId
+    );
+    setCameras((prev) => prev.map((c) => (c.id === cameraId ? tamperedCam : c)));
+  };
+
+  /**
+   * Simulation trigger for camera tamper / obstruction:
+   * Starts the 30-second verification process on the selected camera.
+   */
+  const triggerSimulatedTamper = (cameraId: string) => {
+    triggerCameraObstruction(cameraId, 'lens_covered');
   };
 
   const triggerSimulatedDoorbell = () => {
@@ -1207,6 +1544,10 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         triggerSimulatedDoorbell,
         triggerSimulatedLoitering,
         triggerSimulatedTamper,
+        triggerCameraObstruction,
+        clearCameraObstruction,
+        restoreCameraFromTamper,
+        forceConfirmTampering,
 
         // SANJAYA AI Brain
         aiBrainState,
@@ -1221,6 +1562,10 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         dismissAINotification,
         markAINotificationSafe,
         ingestHardwareEvent,
+
+        // SANJAYA Context-Aware Decision System
+        recentDecisions,
+        runSecurityScenario,
       }}
     >
       {children}

@@ -24,7 +24,14 @@ import {
   Check,
   Zap,
   CornerDownRight,
-  UserCheck
+  UserCheck,
+  Eye,
+  Layers,
+  Play,
+  ArrowRight,
+  TrendingUp,
+  TrendingDown,
+  Minus
 } from 'lucide-react';
 import { useData } from '../../context/DataContext';
 import { useAuth } from '../../context/AuthContext';
@@ -37,8 +44,11 @@ import {
   SecurityEvent, 
   AIAnalysis, 
   AIInsight, 
-  AIConversationMessage 
+  AIConversationMessage,
+  DecisionPipelineExecution 
 } from '../../types';
+import { PREDEFINED_SCENARIOS } from '../../services/decisionSystem';
+
 
 interface AIBrainPageProps {
   onNavigate: (screen: NavScreen) => void;
@@ -60,12 +70,30 @@ export const AIBrainPage: React.FC<AIBrainPageProps> = ({ onNavigate }) => {
     trustedPeople,
     setActiveCameraId,
     setSelectedIncident,
-    incidents
+    incidents,
+    recentDecisions,
+    runSecurityScenario
   } = useData();
 
   const [chatInput, setChatInput] = useState('');
   const [isSending, setIsSending] = useState(false);
-  const [activeTab, setActiveTab] = useState<'overview' | 'timeline' | 'insights' | 'assistant'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'decisions' | 'timeline' | 'insights' | 'assistant'>('overview');
+  const [selectedDecision, setSelectedDecision] = useState<DecisionPipelineExecution | null>(null);
+  const [isRunningScenario, setIsRunningScenario] = useState<string | null>(null);
+
+  const activeDecisionToDisplay = selectedDecision || (recentDecisions && recentDecisions[0]) || null;
+
+  const handleTriggerScenario = async (code: 'A' | 'B' | 'C' | 'D' | 'E' | 'F') => {
+    setIsRunningScenario(code);
+    try {
+      const exec = runSecurityScenario(code);
+      if (exec) {
+        setSelectedDecision(exec);
+      }
+    } finally {
+      setTimeout(() => setIsRunningScenario(null), 500);
+    }
+  };
 
   const homeownerName = user?.full_name || user?.name || 'Homeowner';
   const homeName = user?.home_name || (user?.name ? `${user.name}'s Home` : 'Protected Home');
@@ -239,6 +267,24 @@ export const AIBrainPage: React.FC<AIBrainPageProps> = ({ onNavigate }) => {
           <Activity className="h-4 w-4" />
           <span>Security Overview</span>
         </button>
+
+        <button
+          onClick={() => setActiveTab('decisions')}
+          className={`flex items-center gap-2 border-b-2 px-4 py-3 text-xs font-semibold transition ${
+            activeTab === 'decisions'
+              ? 'border-zinc-900 text-zinc-900'
+              : 'border-transparent text-zinc-400 hover:text-zinc-600'
+          }`}
+        >
+          <Layers className="h-4 w-4 text-emerald-600" />
+          <span>Decision System (4 Layers)</span>
+          {recentDecisions.length > 0 && (
+            <span className="rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 px-1.5 py-0.2 text-[10px] font-bold">
+              {recentDecisions.length}
+            </span>
+          )}
+        </button>
+
 
         <button
           onClick={() => setActiveTab('timeline')}
@@ -447,11 +493,482 @@ export const AIBrainPage: React.FC<AIBrainPageProps> = ({ onNavigate }) => {
               </button>
             </div>
           </div>
+
+          {/* Quick Context-Aware Decision Engine Card in Overview */}
+          <div className="rounded-3xl border border-zinc-200/80 bg-linear-to-br from-zinc-900 to-zinc-950 p-6 text-white shadow-xs">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-zinc-800 pb-5">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                  <Layers className="h-5 w-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-bold tracking-tight text-white">Context-Aware Security Decision System</h3>
+                    <span className="rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-bold px-2 py-0.5 border border-emerald-500/30">
+                      4 Connected Layers
+                    </span>
+                  </div>
+                  <p className="text-xs text-zinc-400 mt-0.5">
+                    Unknown Person $\neq$ Threat. Dynamic risk evaluation using multi-sensor fusion, dwell persistence, and condition-based response.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setActiveTab('decisions')}
+                className="flex items-center gap-1.5 self-start sm:self-auto rounded-full bg-white px-3.5 py-1.5 text-xs font-semibold text-zinc-900 hover:bg-zinc-100 transition shadow-xs"
+              >
+                <span>Open Decision System</span>
+                <ArrowRight className="h-3.5 w-3.5" />
+              </button>
+            </div>
+
+            {/* Core Principle Strip */}
+            <div className="mt-4 flex flex-wrap items-center gap-1.5 text-[11px] font-medium text-zinc-300">
+              <span className="text-zinc-500">Core Principle:</span>
+              <span className="rounded-md bg-zinc-800 px-2 py-0.5 font-bold text-zinc-200">SEE</span>
+              <span>→</span>
+              <span className="rounded-md bg-zinc-800 px-2 py-0.5 font-bold text-zinc-200">UNDERSTAND</span>
+              <span>→</span>
+              <span className="rounded-md bg-zinc-800 px-2 py-0.5 font-bold text-emerald-400 border border-emerald-500/40">CONTEXT</span>
+              <span>→</span>
+              <span className="rounded-md bg-zinc-800 px-2 py-0.5 font-bold text-amber-400 border border-amber-500/40">RISK</span>
+              <span>→</span>
+              <span className="rounded-md bg-zinc-800 px-2 py-0.5 font-bold text-blue-400 border border-blue-500/40">DECIDE</span>
+              <span>→</span>
+              <span className="rounded-md bg-zinc-800 px-2 py-0.5 font-bold text-purple-400 border border-purple-500/40">RESPOND</span>
+              <span>→</span>
+              <span className="rounded-md bg-zinc-800 px-2 py-0.5 font-bold text-zinc-200">REMEMBER</span>
+            </div>
+
+            {/* Quick Test Scenarios */}
+            <div className="mt-5 pt-4 border-t border-zinc-800/80">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400">
+                Interactive Condition Test Suite (Scenarios A through F)
+              </span>
+              <div className="mt-2.5 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+                {PREDEFINED_SCENARIOS.map((sc) => (
+                  <button
+                    key={sc.id}
+                    disabled={isRunningScenario !== null}
+                    onClick={() => handleTriggerScenario(sc.code)}
+                    className="flex flex-col text-left rounded-xl border border-zinc-800 bg-zinc-900/80 p-2.5 hover:bg-zinc-800 hover:border-zinc-700 transition disabled:opacity-50"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-extrabold px-1.5 py-0.2 rounded-md bg-zinc-800 text-zinc-300">
+                        {sc.code}
+                      </span>
+                      <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded-md ${
+                        sc.expectedDecision === 'EMERGENCY_RESPONSE' ? 'bg-red-500/20 text-red-300 border border-red-500/30' :
+                        sc.expectedDecision === 'ESCALATE' ? 'bg-orange-500/20 text-orange-300 border border-orange-500/30' :
+                        sc.expectedDecision === 'WARN' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' :
+                        sc.expectedDecision === 'INFORM' ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30' :
+                        'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                      }`}>
+                        {sc.expectedDecision}
+                      </span>
+                    </div>
+                    <span className="mt-1 text-xs font-bold text-white truncate">{sc.title}</span>
+                    <span className="text-[10px] text-zinc-400 truncate">{sc.subtitle}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB: DECISION SYSTEM (4 CONNECTED LAYERS) */}
+      {activeTab === 'decisions' && (
+        <div className="space-y-6">
+          {/* Header & Architecture Card */}
+          <div className="rounded-3xl border border-zinc-200/80 bg-white p-6 shadow-xs space-y-6">
+            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 border-b border-zinc-100 pb-5">
+              <div>
+                <div className="flex items-center gap-2">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 border border-emerald-200">
+                    <Layers className="h-4 w-4" />
+                  </div>
+                  <h3 className="text-base font-bold text-zinc-900">
+                    Context-Aware Condition-Based Security Decision System
+                  </h3>
+                </div>
+                <p className="mt-1 text-xs text-zinc-500">
+                  Operates 4 connected engines to observe multiple signals, understand context, calculate dynamic risk, choose an explainable response, and remember continuity without ever assuming an unknown visitor is a dangerous threat.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 border border-emerald-200 px-3 py-1 text-xs font-bold text-emerald-700">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  Realtime Pipeline Active
+                </span>
+              </div>
+            </div>
+
+            {/* 4 Connected Layers Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              {/* Layer 1: Context Engine */}
+              <div className="rounded-2xl border border-emerald-200 bg-emerald-50/40 p-4 relative overflow-hidden">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-md">
+                    Layer 1
+                  </span>
+                  <Activity className="h-4 w-4 text-emerald-600" />
+                </div>
+                <h4 className="mt-2 text-sm font-bold text-zinc-900">Context Engine</h4>
+                <p className="mt-1 text-xs text-zinc-600 leading-relaxed">
+                  Aggregates Person Identity (Known vs Unknown), Camera, Home Zone, Mode (HOME/AWAY/NIGHT), Time, Movement, and Multi-Sensor Fusion.
+                </p>
+                <div className="mt-3 pt-2.5 border-t border-emerald-200/60 text-[11px] font-bold text-emerald-800">
+                  ✓ Rule: Unknown $\neq$ Threat
+                </div>
+              </div>
+
+              {/* Layer 2: Risk Engine */}
+              <div className="rounded-2xl border border-amber-200 bg-amber-50/40 p-4 relative overflow-hidden">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-amber-700 bg-amber-100 px-2 py-0.5 rounded-md">
+                    Layer 2
+                  </span>
+                  <TrendingUp className="h-4 w-4 text-amber-600" />
+                </div>
+                <h4 className="mt-2 text-sm font-bold text-zinc-900">Risk Engine</h4>
+                <p className="mt-1 text-xs text-zinc-600 leading-relaxed">
+                  Calculates dynamic risk (LOW, MEDIUM, HIGH, CRITICAL) and trend (Increasing / Stable / Decreasing) based on multi-signal combinations.
+                </p>
+                <div className="mt-3 pt-2.5 border-t border-amber-200/60 text-[11px] font-bold text-amber-800">
+                  ✓ Dynamic Trend Tracker
+                </div>
+              </div>
+
+              {/* Layer 3: Decision Engine */}
+              <div className="rounded-2xl border border-blue-200 bg-blue-50/40 p-4 relative overflow-hidden">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-blue-700 bg-blue-100 px-2 py-0.5 rounded-md">
+                    Layer 3
+                  </span>
+                  <Cpu className="h-4 w-4 text-blue-600" />
+                </div>
+                <h4 className="mt-2 text-sm font-bold text-zinc-900">Decision Engine</h4>
+                <p className="mt-1 text-xs text-zinc-600 leading-relaxed">
+                  Selects operational decision: OBSERVE, INFORM, WARN, ESCALATE, or EMERGENCY RESPONSE with full explainable reasoning.
+                </p>
+                <div className="mt-3 pt-2.5 border-t border-blue-200/60 text-[11px] font-bold text-blue-800">
+                  ✓ Explainable AI Decisions
+                </div>
+              </div>
+
+              {/* Layer 4: Response Engine */}
+              <div className="rounded-2xl border border-purple-200 bg-purple-50/40 p-4 relative overflow-hidden">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-purple-700 bg-purple-100 px-2 py-0.5 rounded-md">
+                    Layer 4
+                  </span>
+                  <Bell className="h-4 w-4 text-purple-600" />
+                </div>
+                <h4 className="mt-2 text-sm font-bold text-zinc-900">Response Engine</h4>
+                <p className="mt-1 text-xs text-zinc-600 leading-relaxed">
+                  Executes notification explaining WHY the alert occurred, creates/updates incidents, and follows authorized emergency escalation timers.
+                </p>
+                <div className="mt-3 pt-2.5 border-t border-purple-200/60 text-[11px] font-bold text-purple-800">
+                  ✓ Safe Escalation Workflow
+                </div>
+              </div>
+            </div>
+
+            {/* Core Principle 7-Stage Chain Strip */}
+            <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">
+                Core Operational Pipeline Sequence:
+              </span>
+              <div className="mt-2.5 grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2 text-center text-xs">
+                <div className="rounded-xl border border-zinc-200 bg-white p-2">
+                  <div className="font-extrabold text-zinc-900">1. SEE</div>
+                  <div className="text-[10px] text-zinc-500 mt-0.5">Camera vision / motion</div>
+                </div>
+                <div className="rounded-xl border border-zinc-200 bg-white p-2">
+                  <div className="font-extrabold text-zinc-900">2. UNDERSTAND</div>
+                  <div className="text-[10px] text-zinc-500 mt-0.5">Biometric identity match</div>
+                </div>
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-2">
+                  <div className="font-extrabold text-emerald-800">3. CONTEXT</div>
+                  <div className="text-[10px] text-emerald-600 mt-0.5">Mode, Zone, Sensors, Dwell</div>
+                </div>
+                <div className="rounded-xl border border-amber-200 bg-amber-50/50 p-2">
+                  <div className="font-extrabold text-amber-800">4. RISK</div>
+                  <div className="text-[10px] text-amber-600 mt-0.5">Dynamic score 0-100</div>
+                </div>
+                <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-2">
+                  <div className="font-extrabold text-blue-800">5. DECIDE</div>
+                  <div className="text-[10px] text-blue-600 mt-0.5">Observe / Inform / Warn / SOS</div>
+                </div>
+                <div className="rounded-xl border border-purple-200 bg-purple-50/50 p-2">
+                  <div className="font-extrabold text-purple-800">6. RESPOND</div>
+                  <div className="text-[10px] text-purple-600 mt-0.5">Explainable action alert</div>
+                </div>
+                <div className="rounded-xl border border-zinc-200 bg-white p-2">
+                  <div className="font-extrabold text-zinc-900">7. REMEMBER</div>
+                  <div className="text-[10px] text-zinc-500 mt-0.5">Spatial tracking memory</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Interactive Condition Scenarios Test Suite (Scenarios A through F) */}
+          <div className="rounded-3xl border border-zinc-200/80 bg-white p-6 shadow-xs space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b border-zinc-100 pb-4">
+              <div>
+                <h4 className="text-sm font-bold text-zinc-900">
+                  Predefined Condition Verification Scenarios (A through F)
+                </h4>
+                <p className="text-xs text-zinc-500">
+                  Click any scenario to simulate the condition in real-time, execute the 7-stage decision pipeline, and observe the explainable reasoning.
+                </p>
+              </div>
+              <span className="text-xs font-medium text-zinc-400">
+                Current Mode: <strong className="uppercase text-zinc-800">{securityMode}</strong>
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              {PREDEFINED_SCENARIOS.map((sc) => {
+                const isSelected = activeDecisionToDisplay?.stages.context.includes(sc.title);
+                return (
+                  <div
+                    key={sc.id}
+                    className="flex flex-col justify-between rounded-2xl border border-zinc-200 bg-zinc-50/60 p-4 hover:border-zinc-300 transition"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-extrabold px-2 py-0.5 rounded-lg bg-zinc-200 text-zinc-800">
+                          SCENARIO {sc.code}
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
+                            sc.expectedRisk === 'CRITICAL' ? 'bg-red-100 text-red-800' :
+                            sc.expectedRisk === 'HIGH' ? 'bg-orange-100 text-orange-800' :
+                            sc.expectedRisk === 'MEDIUM' ? 'bg-amber-100 text-amber-800' :
+                            'bg-emerald-100 text-emerald-800'
+                          }`}>
+                            Risk: {sc.expectedRisk}
+                          </span>
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
+                            sc.expectedDecision === 'EMERGENCY_RESPONSE' ? 'bg-red-600 text-white' :
+                            sc.expectedDecision === 'ESCALATE' ? 'bg-orange-600 text-white' :
+                            sc.expectedDecision === 'WARN' ? 'bg-amber-500 text-white' :
+                            sc.expectedDecision === 'INFORM' ? 'bg-blue-600 text-white' :
+                            'bg-emerald-600 text-white'
+                          }`}>
+                            {sc.expectedDecision}
+                          </span>
+                        </div>
+                      </div>
+
+                      <h5 className="mt-2.5 text-xs font-bold text-zinc-900">{sc.title}</h5>
+                      <span className="text-[11px] font-medium text-zinc-500">{sc.subtitle}</span>
+                      <p className="mt-2 text-[11px] text-zinc-600 leading-relaxed">
+                        {sc.description}
+                      </p>
+                    </div>
+
+                    <div className="mt-4 pt-3 border-t border-zinc-200/70">
+                      <button
+                        onClick={() => handleTriggerScenario(sc.code)}
+                        disabled={isRunningScenario !== null}
+                        className="w-full flex items-center justify-center gap-2 rounded-xl bg-zinc-900 px-3 py-2 text-xs font-semibold text-white hover:bg-zinc-800 transition disabled:opacity-50"
+                      >
+                        {isRunningScenario === sc.code ? (
+                          <>
+                            <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                            <span>Evaluating...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Play className="h-3.5 w-3.5 fill-current" />
+                            <span>Run Scenario {sc.code}</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Active / Inspected Decision Detail View */}
+          {activeDecisionToDisplay ? (
+            <div className="rounded-3xl border border-zinc-200/80 bg-white p-6 shadow-xs space-y-6">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-zinc-100 pb-4">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">
+                      Pipeline Execution Inspector
+                    </span>
+                    <span className="text-xs text-zinc-400 font-mono">
+                      #{activeDecisionToDisplay.id.slice(-8)}
+                    </span>
+                  </div>
+                  <h4 className="text-base font-bold text-zinc-900 mt-0.5">
+                    Live Security Decision Rationale
+                  </h4>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  {/* Risk Badge with Trend */}
+                  <div className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold ${
+                    activeDecisionToDisplay.risk.calculatedRisk === 'CRITICAL' ? 'bg-red-100 text-red-800 border border-red-200' :
+                    activeDecisionToDisplay.risk.calculatedRisk === 'HIGH' ? 'bg-orange-100 text-orange-800 border border-orange-200' :
+                    activeDecisionToDisplay.risk.calculatedRisk === 'MEDIUM' ? 'bg-amber-100 text-amber-800 border border-amber-200' :
+                    'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                  }`}>
+                    <span>Risk: {activeDecisionToDisplay.risk.calculatedRisk}</span>
+                    <span className="text-[10px] opacity-75">({activeDecisionToDisplay.risk.riskScore}/100)</span>
+                    {activeDecisionToDisplay.risk.trend === 'increasing' ? (
+                      <TrendingUp className="h-3 w-3" />
+                    ) : activeDecisionToDisplay.risk.trend === 'decreasing' ? (
+                      <TrendingDown className="h-3 w-3" />
+                    ) : (
+                      <Minus className="h-3 w-3" />
+                    )}
+                  </div>
+
+                  {/* Decision Badge */}
+                  <span className={`rounded-full px-3 py-1 text-xs font-bold ${
+                    activeDecisionToDisplay.decision.decision === 'EMERGENCY_RESPONSE' ? 'bg-red-600 text-white' :
+                    activeDecisionToDisplay.decision.decision === 'ESCALATE' ? 'bg-orange-600 text-white' :
+                    activeDecisionToDisplay.decision.decision === 'WARN' ? 'bg-amber-500 text-white' :
+                    activeDecisionToDisplay.decision.decision === 'INFORM' ? 'bg-blue-600 text-white' :
+                    'bg-emerald-600 text-white'
+                  }`}>
+                    Decision: {activeDecisionToDisplay.decision.decision}
+                  </span>
+                </div>
+              </div>
+
+              {/* Explainable Decision Summary Message */}
+              <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">
+                  Notification Text (Explainable AI Output)
+                </span>
+                <p className="mt-1 text-xs font-semibold text-zinc-900 leading-relaxed">
+                  "{activeDecisionToDisplay.response.summaryText}"
+                </p>
+              </div>
+
+              {/* Explainable Reasons & Recommended Actions */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Explainable Reasons */}
+                <div className="rounded-2xl border border-zinc-100 bg-zinc-50/70 p-4">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-500 flex items-center gap-1.5">
+                    <CheckCircle2 className="h-3.5 w-3.5 text-zinc-700" />
+                    Explainable Evaluation Reasons
+                  </span>
+                  <ul className="mt-2.5 space-y-1.5 text-xs text-zinc-700">
+                    {activeDecisionToDisplay.decision.explainableReasons.map((reason, idx) => (
+                      <li key={idx} className="flex items-start gap-2">
+                        <span className="text-zinc-400">•</span>
+                        <span>{reason}</span>
+                      </li>
+                    ))}
+                  </ul>
+
+                  {/* Mitigating Factors */}
+                  {activeDecisionToDisplay.risk.mitigatingFactors.length > 0 && (
+                    <div className="mt-4 pt-3 border-t border-zinc-200/60">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700">
+                        Mitigating Context (Prevented False Danger)
+                      </span>
+                      <ul className="mt-1.5 space-y-1 text-[11px] text-emerald-800">
+                        {activeDecisionToDisplay.risk.mitigatingFactors.map((mit, i) => (
+                          <li key={i} className="flex items-start gap-1.5">
+                            <span className="text-emerald-500">✓</span>
+                            <span>{mit}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+
+                {/* Recommended Actions & Dispatched Responses */}
+                <div className="rounded-2xl border border-zinc-100 bg-zinc-50/70 p-4">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-500 flex items-center gap-1.5">
+                    <ShieldCheck className="h-3.5 w-3.5 text-zinc-700" />
+                    Dispatched System Responses
+                  </span>
+                  <ul className="mt-2.5 space-y-1.5 text-xs text-zinc-700">
+                    {activeDecisionToDisplay.response.actionsDispatched.map((action, idx) => (
+                      <li key={idx} className="flex items-start gap-2">
+                        <span className="text-emerald-600 font-bold">→</span>
+                        <span>{action}</span>
+                      </li>
+                    ))}
+                  </ul>
+
+                  <div className="mt-4 pt-3 border-t border-zinc-200/60">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">
+                      Recommended Next Action
+                    </span>
+                    <div className="mt-1 text-xs font-semibold text-zinc-900">
+                      {activeDecisionToDisplay.decision.recommendedActions[0] || 'Observe ambient security'}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* 7-Stage Pipeline Trace */}
+              <div className="border-t border-zinc-100 pt-4 space-y-3">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-400">
+                  Detailed 7-Stage Pipeline Execution Log
+                </span>
+                <div className="space-y-2 font-mono text-[11px]">
+                  <div className="rounded-xl bg-zinc-50 border border-zinc-100 p-2.5 flex items-start gap-2">
+                    <span className="font-bold text-zinc-400 uppercase w-24 shrink-0">Stage 1: SEE</span>
+                    <span className="text-zinc-700">{activeDecisionToDisplay.stages.see}</span>
+                  </div>
+                  <div className="rounded-xl bg-zinc-50 border border-zinc-100 p-2.5 flex items-start gap-2">
+                    <span className="font-bold text-zinc-400 uppercase w-24 shrink-0">Stage 2: UNDERSTAND</span>
+                    <span className="text-zinc-700">{activeDecisionToDisplay.stages.understand}</span>
+                  </div>
+                  <div className="rounded-xl bg-emerald-50/40 border border-emerald-100 p-2.5 flex items-start gap-2">
+                    <span className="font-bold text-emerald-700 uppercase w-24 shrink-0">Stage 3: CONTEXT</span>
+                    <span className="text-zinc-800">{activeDecisionToDisplay.stages.context}</span>
+                  </div>
+                  <div className="rounded-xl bg-amber-50/40 border border-amber-100 p-2.5 flex items-start gap-2">
+                    <span className="font-bold text-amber-700 uppercase w-24 shrink-0">Stage 4: RISK</span>
+                    <span className="text-zinc-800">{activeDecisionToDisplay.stages.risk}</span>
+                  </div>
+                  <div className="rounded-xl bg-blue-50/40 border border-blue-100 p-2.5 flex items-start gap-2">
+                    <span className="font-bold text-blue-700 uppercase w-24 shrink-0">Stage 5: DECIDE</span>
+                    <span className="text-zinc-800">{activeDecisionToDisplay.stages.decide}</span>
+                  </div>
+                  <div className="rounded-xl bg-purple-50/40 border border-purple-100 p-2.5 flex items-start gap-2">
+                    <span className="font-bold text-purple-700 uppercase w-24 shrink-0">Stage 6: RESPOND</span>
+                    <span className="text-zinc-800">{activeDecisionToDisplay.stages.respond}</span>
+                  </div>
+                  <div className="rounded-xl bg-zinc-50 border border-zinc-100 p-2.5 flex items-start gap-2">
+                    <span className="font-bold text-zinc-400 uppercase w-24 shrink-0">Stage 7: REMEMBER</span>
+                    <span className="text-zinc-700">{activeDecisionToDisplay.stages.remember}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-3xl border border-zinc-200 bg-white p-12 text-center">
+              <Layers className="h-8 w-8 text-zinc-400 mx-auto" />
+              <h4 className="mt-3 text-sm font-bold text-zinc-900">No Decision Pipeline Runs Recorded Yet</h4>
+              <p className="mt-1 text-xs text-zinc-500 max-w-sm mx-auto">
+                Click any of the predefined scenarios above or simulate camera activity to inspect live multi-signal security reasoning.
+              </p>
+            </div>
+          )}
         </div>
       )}
 
       {/* TAB 2: TIMELINE */}
       {activeTab === 'timeline' && (
+
         <div className="rounded-3xl border border-zinc-200/80 bg-white p-6 shadow-xs space-y-4">
           <div className="flex items-center justify-between border-b border-zinc-100 pb-4">
             <div>

@@ -18,7 +18,8 @@ export const DeviceHealthAndSensors: React.FC = () => {
   const { sensors, deviceHealth, cameras } = useData();
   const [expanded, setExpanded] = useState(false);
 
-  const tamperedCameras = cameras.filter(c => c.is_tampered);
+  const verifyingCameras = cameras.filter(c => c.status !== 'offline' && c.view_status === 'possible_obstruction');
+  const tamperedCameras = cameras.filter(c => c.status !== 'offline' && (c.is_tampered || c.status === 'tampered' || c.view_status === 'obstructed_confirmed'));
   const offlineCameras = cameras.filter(c => c.status === 'offline');
 
   return (
@@ -41,9 +42,13 @@ export const DeviceHealthAndSensors: React.FC = () => {
                 <span className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-bold text-red-700">
                   {tamperedCameras.length} Tampered
                 </span>
+              ) : verifyingCameras.length > 0 ? (
+                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800 animate-pulse">
+                  {verifyingCameras.length} Checking View
+                </span>
               ) : offlineCameras.length > 0 ? (
-                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800">
-                  {offlineCameras.length} Offline
+                <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-bold text-zinc-700">
+                  {offlineCameras.length} Disconnected
                 </span>
               ) : (
                 <span className="rounded-full bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-[10px] font-bold text-emerald-700">

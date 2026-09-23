@@ -44,6 +44,9 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
     triggerSimulatedLoitering,
     triggerSimulatedDoorbell,
     triggerSimulatedTamper,
+    clearCameraObstruction,
+    restoreCameraFromTamper,
+    forceConfirmTampering,
     escalationSession,
     openEscalationModal,
     respondToEmergencyContact,
@@ -143,31 +146,47 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
           {/* Quick zone switcher pills */}
           <div className="flex items-center gap-2 overflow-x-auto pt-1 pb-1">
             <span className="text-xs text-zinc-400 font-medium shrink-0">Monitored Feeds:</span>
-            {cameras.map((cam) => (
-              <button
-                key={cam.id}
-                onClick={() => setActiveCameraId(cam.id)}
-                className={`flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium border transition shrink-0 ${
-                  cam.id === activeCamera.id
-                    ? 'border-zinc-900 bg-zinc-900 text-white shadow-xs'
-                    : 'border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50'
-                }`}
-              >
-                <span
-                  className={`h-1.5 w-1.5 rounded-full ${
-                    cam.status === 'tampered'
-                      ? 'bg-red-500 animate-ping'
-                      : cam.status === 'online'
-                      ? 'bg-emerald-500'
-                      : 'bg-zinc-400'
+            {cameras.map((cam) => {
+              const isVerifying = cam.status !== 'offline' && cam.view_status === 'possible_obstruction';
+              const isTampered = cam.status !== 'offline' && (cam.status === 'tampered' || cam.view_status === 'obstructed_confirmed' || cam.is_tampered);
+              const isOffline = cam.status === 'offline';
+
+              return (
+                <button
+                  key={cam.id}
+                  onClick={() => setActiveCameraId(cam.id)}
+                  className={`flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium border transition shrink-0 ${
+                    cam.id === activeCamera.id
+                      ? 'border-zinc-900 bg-zinc-900 text-white shadow-xs'
+                      : 'border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50'
                   }`}
-                />
-                <span>{cam.name}</span>
-                {cam.is_tampered && (
-                  <span className="text-[9px] font-bold text-red-300 ml-1">TAMPERED</span>
-                )}
-              </button>
-            ))}
+                >
+                  <span
+                    className={`h-1.5 w-1.5 rounded-full ${
+                      isTampered
+                        ? 'bg-red-500 animate-ping'
+                        : isVerifying
+                        ? 'bg-amber-400 animate-pulse'
+                        : !isOffline
+                        ? 'bg-emerald-500'
+                        : 'bg-zinc-400'
+                    }`}
+                  />
+                  <span>{cam.name}</span>
+                  {isVerifying && cam.obstruction_verification && (
+                    <span className="text-[9px] font-bold text-amber-300 ml-1">
+                      CHECKING ({cam.obstruction_verification.remainingSeconds}s)
+                    </span>
+                  )}
+                  {isTampered && (
+                    <span className="text-[9px] font-bold text-red-300 ml-1">TAMPERED</span>
+                  )}
+                  {isOffline && (
+                    <span className="text-[9px] font-medium text-zinc-400 ml-1">OFFLINE</span>
+                  )}
+                </button>
+              );
+            })}
           </div>
         </div>
 
@@ -325,13 +344,36 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
             <span className="text-[11px] font-semibold text-zinc-800">Doorbell Chime</span>
           </button>
 
-          <button
-            onClick={() => triggerSimulatedTamper(activeCamera.id)}
-            className="flex flex-col items-center justify-center gap-1.5 rounded-xl border border-red-200 bg-red-50/40 p-2.5 hover:bg-red-100/60 hover:border-red-300 transition text-center"
-          >
-            <EyeOff className="h-4 w-4 text-red-600" />
-            <span className="text-[11px] font-semibold text-red-700">Tamper Camera</span>
-          </button>
+          {activeCamera.view_status === 'possible_obstruction' ? (
+            <button
+              onClick={() => clearCameraObstruction(activeCamera.id)}
+              className="flex flex-col items-center justify-center gap-1.5 rounded-xl border border-amber-300 bg-amber-50 p-2.5 hover:bg-amber-100/80 transition text-center animate-pulse"
+              title="Click to simulate obstruction disappearing within 30s (No alert created)"
+            >
+              <EyeOff className="h-4 w-4 text-amber-600" />
+              <span className="text-[11px] font-semibold text-amber-800">
+                Checking ({activeCamera.obstruction_verification?.remainingSeconds}s)
+              </span>
+            </button>
+          ) : activeCamera.status === 'tampered' || activeCamera.view_status === 'obstructed_confirmed' || activeCamera.is_tampered ? (
+            <button
+              onClick={() => restoreCameraFromTamper(activeCamera.id)}
+              className="flex flex-col items-center justify-center gap-1.5 rounded-xl border border-red-300 bg-red-100/80 p-2.5 hover:bg-red-200 transition text-center"
+              title="Click to clear tampering and restore feed"
+            >
+              <EyeOff className="h-4 w-4 text-red-600" />
+              <span className="text-[11px] font-semibold text-red-700">Restore Feed</span>
+            </button>
+          ) : (
+            <button
+              onClick={() => triggerSimulatedTamper(activeCamera.id)}
+              className="flex flex-col items-center justify-center gap-1.5 rounded-xl border border-red-200 bg-red-50/40 p-2.5 hover:bg-red-100/60 hover:border-red-300 transition text-center"
+              title="Start 30-second verification on active camera"
+            >
+              <EyeOff className="h-4 w-4 text-red-600" />
+              <span className="text-[11px] font-semibold text-red-700">Cover Lens (30s)</span>
+            </button>
+          )}
         </div>
       </div>
 

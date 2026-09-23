@@ -7,7 +7,8 @@ import {
   ChevronRight, 
   Clock, 
   MapPin, 
-  ShieldCheck
+  ShieldCheck,
+  EyeOff
 } from 'lucide-react';
 import { useData } from '../../context/DataContext';
 import { Incident } from '../../types';
@@ -17,7 +18,7 @@ interface IncidentsPageProps {
   onNavigate: (screen: NavScreen) => void;
 }
 
-type IncidentFilter = 'all' | 'known' | 'unknown' | 'sos';
+type IncidentFilter = 'all' | 'known' | 'unknown' | 'sos' | 'tamper';
 
 export const IncidentsPage: React.FC<IncidentsPageProps> = ({ onNavigate }) => {
   const { incidents, detections, setSelectedIncident } = useData();
@@ -31,6 +32,7 @@ export const IncidentsPage: React.FC<IncidentsPageProps> = ({ onNavigate }) => {
       seen.add(inc.id);
 
       if (filter === 'sos') return inc.type === 'sos_activated';
+      if (filter === 'tamper') return inc.type === 'camera_tampering';
       if (filter === 'unknown') return inc.type === 'unknown_detection';
       if (filter === 'known') {
         const det = detections.find((d) => d.id === inc.detection_id);
@@ -73,7 +75,7 @@ export const IncidentsPage: React.FC<IncidentsPageProps> = ({ onNavigate }) => {
 
       {/* Filter Tabs matching Screen 4 */}
       <div className="flex items-center gap-2 overflow-x-auto pb-1">
-        {(['all', 'known', 'unknown', 'sos'] as IncidentFilter[]).map((tab) => (
+        {(['all', 'known', 'unknown', 'tamper', 'sos'] as IncidentFilter[]).map((tab) => (
           <button
             key={tab}
             onClick={() => setFilter(tab)}
@@ -83,7 +85,7 @@ export const IncidentsPage: React.FC<IncidentsPageProps> = ({ onNavigate }) => {
                 : 'bg-white text-zinc-600 border border-zinc-200 hover:bg-zinc-50'
             }`}
           >
-            {tab === 'sos' ? 'SOS' : tab}
+            {tab === 'sos' ? 'SOS' : tab === 'tamper' ? 'Tampering' : tab}
           </button>
         ))}
       </div>
@@ -149,6 +151,7 @@ interface IncidentRowItemProps {
 
 const IncidentRowItem: React.FC<IncidentRowItemProps> = ({ incident, onSelect }) => {
   const { cameras, detections, trustedPeople } = useData();
+  const isTamper = incident.type === 'camera_tampering';
   const isUnknown = incident.type === 'unknown_detection';
   const isSos = incident.type === 'sos_activated';
   const isCancelled = incident.status === 'cancelled';
@@ -172,7 +175,9 @@ const IncidentRowItem: React.FC<IncidentRowItemProps> = ({ incident, onSelect })
         {/* Status Icon */}
         <div
           className={`flex h-10 w-10 items-center justify-center rounded-xl shrink-0 ${
-            isEscalated
+            isTamper
+              ? 'bg-red-50 text-red-600 border border-red-200'
+              : isEscalated
               ? 'bg-red-50 text-red-600 border border-red-200'
               : isCancelled
               ? 'bg-zinc-100 text-zinc-600 border border-zinc-200'
@@ -181,7 +186,9 @@ const IncidentRowItem: React.FC<IncidentRowItemProps> = ({ incident, onSelect })
               : 'bg-emerald-50 text-emerald-600 border border-emerald-200'
           }`}
         >
-          {isEscalated ? (
+          {isTamper ? (
+            <EyeOff className="h-5 w-5 text-red-600" />
+          ) : isEscalated ? (
             <ShieldAlert className="h-5 w-5" />
           ) : isCancelled ? (
             <AlertOctagon className="h-5 w-5" />
@@ -195,7 +202,9 @@ const IncidentRowItem: React.FC<IncidentRowItemProps> = ({ incident, onSelect })
         <div>
           <div className="flex items-center gap-2">
             <h4 className="text-sm font-bold text-zinc-900 group-hover:text-zinc-700 transition">
-              {isSos
+              {isTamper
+                ? incident.what || `🚨 Camera Tampering: ${linkedCamera?.name || incident.camera_name || 'Camera'}`
+                : isSos
                 ? isCancelled
                   ? 'SOS cancelled'
                   : 'SOS Emergency Activated'
@@ -225,13 +234,19 @@ const IncidentRowItem: React.FC<IncidentRowItemProps> = ({ incident, onSelect })
           <div className="mt-1 flex items-center gap-2 text-xs text-zinc-500">
             <span className="flex items-center gap-1">
               <MapPin className="h-3 w-3" />
-              {locationName}
+              {isTamper ? `${linkedCamera?.name || incident.camera_name || 'Camera'} (${locationName})` : locationName}
             </span>
             <span>•</span>
             <span className="flex items-center gap-1">
               <Clock className="h-3 w-3" />
               {new Date(incident.started_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
             </span>
+            {isTamper && (
+              <>
+                <span>•</span>
+                <span className="font-semibold text-red-600">30s continuous obstruction</span>
+              </>
+            )}
           </div>
         </div>
       </div>

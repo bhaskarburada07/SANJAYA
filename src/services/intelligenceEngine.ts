@@ -1,6 +1,4 @@
 import { 
-  Detection, 
-  Incident, 
   RiskLevel, 
   EventClassification, 
   SecurityMode, 
@@ -10,6 +8,10 @@ import {
   CrossCameraPathPoint,
   Camera
 } from '../types';
+import { ContextEngine } from './decisionSystem/contextEngine';
+import { RiskEngine } from './decisionSystem/riskEngine';
+import { DecisionEngine } from './decisionSystem/decisionEngine';
+import { ResponseEngine } from './decisionSystem/responseEngine';
 
 export interface EvaluationInput {
   personType: 'known' | 'unknown';
@@ -22,6 +24,8 @@ export interface EvaluationInput {
   behaviourTags?: string[];
   category?: 'person' | 'vehicle' | 'package' | 'pet' | 'loitering';
   sensorTriggers?: string[];
+  doorInteraction?: boolean;
+  windowInteraction?: boolean;
 }
 
 export interface IntelligenceResult {
@@ -32,149 +36,100 @@ export interface IntelligenceResult {
   recommended_actions: string[];
   behaviour_sequence: BehaviorStep[];
   camera_path: CrossCameraPathPoint[];
+  decision?: 'OBSERVE' | 'INFORM' | 'WARN' | 'ESCALATE' | 'EMERGENCY_RESPONSE';
+  pipeline_stages?: {
+    see: string;
+    understand: string;
+    context: string;
+    risk: string;
+    decide: string;
+    respond: string;
+    remember: string;
+  };
 }
 
 export class IntelligenceEngine {
   /**
-   * Evaluates Risk, Context, and generates AI Explanation following:
-   * WHO + WHERE + WHEN + WHAT + HOW LONG + HOME MODE + EXPECTED BEHAVIOUR
+   * Upgraded Multi-Signal Contextual Evaluator
+   * Connects Context Engine + Risk Engine + Decision Engine + Response Engine
+   * 
+   * Strict Rule: UNKNOWN PERSON DOES NOT EQUAL THREAT.
    */
   static evaluate(input: EvaluationInput): IntelligenceResult {
     const now = new Date();
     const currentHour = input.hour ?? now.getHours();
-    const isNight = currentHour >= 22 || currentHour < 6;
-    const isLateEvening = currentHour >= 19 && currentHour < 22;
-    const isAway = input.securityMode === 'away';
-    const isNightMode = input.securityMode === 'night';
-    const isRestrictedZone = input.zone.type === 'bedroom' || input.zone.type === 'backyard';
-    const isHighSensitivity = input.zone.sensitivity === 'high';
-    const isKnown = input.personType === 'known' && !!input.person;
 
-    const riskFactors: string[] = [];
-    const recommendedActions: string[] = [];
-    let risk_level: RiskLevel = 'LOW';
+    // 1. Context Engine
+    const context = ContextEngine.evaluateContext({
+      personType: input.personType,
+      personId: input.person?.id,
+      personName: input.person?.name,
+      confidence: input.personType === 'known' ? 0.96 : 0.90,
+      camera: input.camera,
+      zone: input.zone,
+      securityMode: input.securityMode,
+      dwellTimeSeconds: input.dwellTimeSeconds,
+      behaviourTags: input.behaviourTags,
+      doorInteraction: input.doorInteraction,
+      windowInteraction: input.windowInteraction,
+      hour: currentHour,
+      category: input.category,
+      trustedPeople: input.person ? [input.person] : [],
+    });
+
+    // 2. Risk Engine
+    const riskOutput = RiskEngine.evaluateRisk(context);
+
+    // 3. Decision Engine
+    const decisionOutput = DecisionEngine.decide(context, riskOutput);
+
+    // 4. Map to EventClassification & RiskLevel
+    const risk_level: RiskLevel = riskOutput.calculatedRisk;
     let classification: EventClassification = 'NORMAL';
-
-    // 1. Identity & Permissions Check
-    if (isKnown && input.person) {
-      if (input.person.is_restricted) {
-        riskFactors.push(`Flagged contact: ${input.person.name} has restricted status`);
-        risk_level = 'HIGH';
-        classification = 'UNUSUAL';
-      } else if (input.person.restricted_zones?.includes(input.zone.name)) {
-        riskFactors.push(`Restricted zone violation: ${input.person.name} entered ${input.zone.name}`);
-        risk_level = 'MEDIUM';
-        classification = 'UNUSUAL';
-      } else {
-        riskFactors.push(`Trusted identity confirmed: ${input.person.name} (${input.person.relationship})`);
-        risk_level = 'LOW';
-        classification = 'NORMAL';
-      }
-    } else {
-      riskFactors.push('Unrecognized visitor: Face embeddings do not match trusted registry');
-      risk_level = 'MEDIUM';
-      classification = 'UNUSUAL';
-    }
-
-    // 2. Zone Sensitivity & Time Context
-    if (isNight) {
-      riskFactors.push(`Unusual late-night hour (${currentHour.toString().padStart(2, '0')}:15)`);
-      if (!isKnown) {
-        risk_level = isAway || isNightMode ? 'CRITICAL' : 'HIGH';
-        classification = 'CRITICAL';
-      } else {
-        if (risk_level === 'LOW') risk_level = 'LOW';
-      }
-    }
-
-    if (isRestrictedZone && !isKnown) {
-      riskFactors.push(`Unauthorized presence in high-sensitivity zone: ${input.zone.name}`);
-      if (risk_level !== 'CRITICAL') {
-        risk_level = isAway || isNight ? 'CRITICAL' : 'HIGH';
-        classification = 'CRITICAL';
-      }
-    }
-
-    // 3. Security Mode Multiplier
-    if (isAway && !isKnown) {
-      riskFactors.push('Away Mode active: Home is unoccupied by owner');
-      if (risk_level !== 'CRITICAL') risk_level = 'HIGH';
+    if (risk_level === 'CRITICAL') {
       classification = 'CRITICAL';
-    }
-
-    // 4. Dwell Time & Behaviour
-    if (input.dwellTimeSeconds > 60) {
-      riskFactors.push(`Loitering observed: Visitor has dwelled for ${input.dwellTimeSeconds}s`);
-      if (risk_level === 'LOW' && !isKnown) risk_level = 'MEDIUM';
-    }
-
-    if (input.behaviourTags?.includes('touches_handle') || input.behaviourTags?.includes('attempting_door')) {
-      riskFactors.push('Physical interaction: Observed touching door handle or attempting entry');
-      risk_level = 'CRITICAL';
-      classification = 'CRITICAL';
-    }
-
-    if (input.behaviourTags?.includes('looking_into_windows')) {
-      riskFactors.push('Suspicious gaze: Subject observed peering into perimeter windows');
-      if (risk_level !== 'CRITICAL') risk_level = 'HIGH';
-      classification = 'CRITICAL';
-    }
-
-    // 5. Build AI Explanation
-    let ai_explanation = '';
-    const subject = isKnown && input.person ? input.person.name : 'An unidentified person';
-    const timeDesc = isNight ? 'at late night' : isLateEvening ? 'during evening hours' : 'during daytime';
-    const modeDesc = isAway ? 'while Away Mode is active' : isNightMode ? 'in Night Guard mode' : 'in Home Secure mode';
-
-    if (isKnown && !input.person?.is_restricted) {
-      ai_explanation = `${subject} (${input.person?.relationship}) arrived at ${input.zone.name} ${timeDesc} ${modeDesc}. Behavior is consistent with trusted family routine.`;
-      recommendedActions.push('No action required — Routine arrival verified');
-    } else if (risk_level === 'CRITICAL') {
-      ai_explanation = `${subject} was detected in ${input.zone.name} ${timeDesc} ${modeDesc}. Sequence exhibits high-risk indicators: dwell time ${input.dwellTimeSeconds}s, restricted zone approach, and absence of owner authorization.`;
-      recommendedActions.push('Activate Deterrent Spotlight & Two-Way Voice');
-      recommendedActions.push('Verify live camera feed immediately');
-      recommendedActions.push('Notify enrolled emergency contacts if unverified');
     } else if (risk_level === 'HIGH') {
-      ai_explanation = `${subject} detected at ${input.zone.name} ${timeDesc}. Threat assessment evaluated as HIGH due to unexpected presence in ${input.zone.name} with no matching trusted enrollment.`;
-      recommendedActions.push('Open Live Video to initiate voice verification');
-      recommendedActions.push('Sound 85dB deterrence chime if subject does not depart');
+      classification = 'UNUSUAL';
+    } else if (risk_level === 'MEDIUM') {
+      classification = 'IMPORTANT';
     } else {
-      ai_explanation = `${subject} detected at ${input.zone.name}. Subject has been present for ${input.dwellTimeSeconds} seconds. Routine visitor verification is recommended.`;
-      recommendedActions.push('Speak with visitor via Two-Way Talk');
-      recommendedActions.push('Enroll visitor to Trusted Database if recognized');
+      classification = 'NORMAL';
     }
 
-    // 6. Build Behavior Sequence
+    // High quality explainable message
+    const ai_explanation = ResponseEngine.formatNotificationMessage(context, riskOutput, decisionOutput);
+
+    // Behaviour sequence
     const nowTime = now.getTime();
     const behaviour_sequence: BehaviorStep[] = [
       {
         id: `bs-1-${nowTime}`,
         timestamp: new Date(nowTime - (input.dwellTimeSeconds + 15) * 1000).toISOString(),
-        action: 'Motion detected entering camera field of view',
+        action: `Visual motion detected by ${input.camera.name} at ${input.zone.name}`,
         zone: input.zone.name,
         dwell_seconds: 5,
       },
       {
         id: `bs-2-${nowTime}`,
         timestamp: new Date(nowTime - (input.dwellTimeSeconds + 8) * 1000).toISOString(),
-        action: `Traversed pathway into ${input.zone.name}`,
+        action: `Evaluated movement: "${context.behaviour.movement}"`,
         zone: input.zone.name,
         dwell_seconds: 8,
       },
       {
         id: `bs-3-${nowTime}`,
         timestamp: new Date(nowTime - input.dwellTimeSeconds * 1000).toISOString(),
-        action: isKnown 
-          ? `Approach to entrance by ${input.person?.name}`
-          : input.behaviourTags?.includes('attempting_door')
-          ? 'Approached door and checked handle mechanism'
+        action: context.identity.isKnown 
+          ? `Routine entrance approach by verified contact ${context.identity.personName}`
+          : context.behaviour.doorInteraction
+          ? 'Physical entrance interaction (checked door handle / lock mechanism)'
           : `Stationary presence near entryway (${input.dwellTimeSeconds}s elapsed)`,
         zone: input.zone.name,
         dwell_seconds: input.dwellTimeSeconds,
       },
     ];
 
-    // 7. Cross-Camera Tracking Path
+    // Cross-Camera Tracking Path
     const camera_path: CrossCameraPathPoint[] = [
       {
         camera_id: input.camera.id,
@@ -189,11 +144,23 @@ export class IntelligenceEngine {
     return {
       risk_level,
       classification,
-      risk_factors: riskFactors,
+      risk_factors: decisionOutput.explainableReasons,
       ai_explanation,
-      recommended_actions: recommendedActions,
+      recommended_actions: decisionOutput.recommendedActions,
       behaviour_sequence,
       camera_path,
+      decision: decisionOutput.decision,
+      pipeline_stages: {
+        see: `Camera sensor ${input.camera.name} captured person bounding box in ${input.zone.name}.`,
+        understand: context.identity.isKnown 
+          ? `Biometric embedding match: ${context.identity.personName} (${context.identity.relationship || 'Household'}).`
+          : 'Biometric embeddings do not match enrolled database. Unrecognized visitor.',
+        context: `Context: Mode=${input.securityMode.toUpperCase()}, Dwell=${input.dwellTimeSeconds}s, Movement=${context.behaviour.movement}.`,
+        risk: `Dynamic Risk=${riskOutput.calculatedRisk} (Score: ${riskOutput.riskScore}/100, Trend: ${riskOutput.trend.toUpperCase()}).`,
+        decide: `Decision=${decisionOutput.decision}: ${decisionOutput.decisionRationale}`,
+        respond: `Recommended: ${decisionOutput.recommendedActions.join('; ')}`,
+        remember: `Logged to local spatial memory. Tracking continuity preserved across zones.`,
+      },
     };
   }
 }

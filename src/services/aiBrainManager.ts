@@ -9,24 +9,18 @@ import {
   TrustedPerson, 
   Camera, 
   Zone, 
-  SecuritySensor,
-  Incident,
-  Detection,
-  AISeverity,
-  AIConversationMessage
+  SecuritySensor, 
+  Incident, 
+  Detection, 
+  AISeverity, 
+  AIConversationMessage,
+  DecisionPipelineExecution,
+  MovementType,
+  AIBrainState
 } from '../types';
 import { SanjayaAIService } from './sanjayaAIService';
 import { SecurityHardwareAdapter } from './hardwareAbstraction';
-
-export interface AIBrainState {
-  events: SecurityEvent[];
-  analyses: AIAnalysis[];
-  insights: AIInsight[];
-  notifications: AINotification[];
-  dailySummary: DailyAISummary;
-  status: AIBrainStatus;
-  conversation: AIConversationMessage[];
-}
+import { SanjayaDecisionSystem } from './decisionSystem/sanjayaDecisionSystem';
 
 export class AIBrainManager {
   /**
@@ -228,7 +222,45 @@ export class AIBrainManager {
       );
     });
 
-    // 2. Perform AI Event Analysis
+    // 2. Execute 7-Stage Decision Pipeline (SEE -> UNDERSTAND -> CONTEXT -> RISK -> DECIDE -> RESPOND -> REMEMBER)
+    const matchingCamera = context.cameras.find(c => c.id === rawEvent.sourceId) || context.cameras[0] || {
+      id: rawEvent.sourceId,
+      user_id: context.userId,
+      name: rawEvent.sourceName,
+      location: rawEvent.zoneName || 'Entrance',
+      status: 'online' as const,
+      is_simulation: true,
+      created_at: new Date().toISOString(),
+    };
+    const matchingZone = context.zones.find(z => z.name.toLowerCase() === (rawEvent.zoneName || '').toLowerCase()) || context.zones[0] || {
+      id: 'zone-1',
+      name: rawEvent.zoneName || 'Main Entrance',
+      type: 'entrance' as const,
+      sensitivity: 'high' as const,
+      privacy_level: 'standard' as const,
+      is_monitored: true,
+      camera_ids: [matchingCamera.id],
+      sensor_ids: [],
+    };
+
+    const decisionResult = SanjayaDecisionSystem.processObservation(
+      context.userId,
+      context.homeId,
+      {
+        personType: rawEvent.personType,
+        personId: rawEvent.personId,
+        personName: rawEvent.personName,
+        camera: matchingCamera,
+        zone: matchingZone,
+        securityMode: context.securityMode,
+        dwellTimeSeconds: rawEvent.dwellTimeSeconds || 25,
+        trustedPeople: context.trustedPeople,
+        sensors: context.sensors,
+      },
+      { playAudio: false }
+    );
+
+    // 3. Perform AI Event Analysis
     const analysis = await SanjayaAIService.analyzeSecurityEvent(rawEvent, {
       homeName: context.homeName,
       homeownerName: context.homeownerName,
@@ -263,36 +295,9 @@ export class AIBrainManager {
           { label: 'Mark Safe', actionKey: 'mark_safe', payload: { eventId: rawEvent.id } },
         ],
       };
-    } else {
-      // Normal or distinct smart notification
-      const actions: AINotification['actions'] = [
-        { label: 'View Camera', actionKey: 'view_camera', payload: { cameraId: rawEvent.sourceId } },
-        { label: 'View Event', actionKey: 'view_event', payload: { eventId: rawEvent.id } },
-      ];
-
-      if (analysis.severity === 'attention' || analysis.severity === 'high') {
-        actions.push({ label: 'Mark Safe', actionKey: 'mark_safe', payload: { eventId: rawEvent.id } });
-        actions.push({ label: 'Notify Family', actionKey: 'notify_family', payload: { eventId: rawEvent.id } });
-      } else {
-        actions.push({ label: 'Dismiss', actionKey: 'dismiss', payload: { eventId: rawEvent.id } });
-      }
-
-      newNotification = {
-        id: `ainotif-${now}`,
-        userId: context.userId,
-        homeId: context.homeId,
-        eventId: rawEvent.id,
-        title: analysis.classification === 'family_arrival' 
-          ? `Family Arrival: ${rawEvent.personName || 'Member'}`
-          : analysis.classification === 'device_tamper'
-          ? 'Device Tamper Alert'
-          : `Activity: ${rawEvent.zoneName || 'Entrance'}`,
-        message: analysis.summary,
-        severity: analysis.severity,
-        timestamp: new Date().toISOString(),
-        read: false,
-        actions,
-      };
+    } else if (decisionResult.execution.decision.decision !== 'OBSERVE') {
+      // Use explainable notification from Response Engine
+      newNotification = decisionResult.execution.response.notificationCreated;
     }
 
     const updatedEvents = [rawEvent, ...currentState.events].slice(0, 50);
@@ -300,6 +305,10 @@ export class AIBrainManager {
     const updatedNotifications = newNotification 
       ? [newNotification, ...currentState.notifications].slice(0, 30)
       : currentState.notifications;
+
+    const existingDecisions = currentState.recentDecisions || [];
+    const updatedDecisions = [decisionResult.execution, ...existingDecisions].slice(0, 30);
+
 
     // Recalculate status
     const attentionTotal = updatedAnalyses.filter(a => a.severity === 'attention').length;
@@ -340,6 +349,7 @@ export class AIBrainManager {
       insights: updatedInsights,
       notifications: updatedNotifications,
       status: updatedStatus,
+      recentDecisions: updatedDecisions,
     };
 
     this.saveState(context.userId, context.homeId, updatedState);

@@ -14,7 +14,8 @@ import {
   Activity,
   Layers,
   HelpCircle,
-  Footprints
+  Footprints,
+  EyeOff
 } from 'lucide-react';
 import { Incident } from '../../types';
 import { useData } from '../../context/DataContext';
@@ -281,6 +282,58 @@ export const IncidentDetailPage: React.FC<IncidentDetailPageProps> = ({
       {/* Tab 1: Incident Brain Analysis */}
       {activeTab === 'brain' && (
         <div className="space-y-4">
+          {/* If tampering incident, show specific camera obstruction forensic breakdown */}
+          {incident.type === 'camera_tampering' && (
+            <div className="rounded-2xl border border-red-200 bg-red-50/70 p-5 shadow-xs">
+              <div className="flex items-center gap-2 text-red-700 font-bold text-xs uppercase tracking-wider mb-2">
+                <EyeOff className="h-4 w-4 text-red-600" />
+                <span>Physical Obstruction & Tampering Telemetry</span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs mt-3">
+                <div className="rounded-xl bg-white/90 border border-red-200/80 p-3">
+                  <span className="text-zinc-500 block mb-1">Affected Camera</span>
+                  <span className="font-bold text-zinc-900 text-sm">
+                    {incident.camera_name || linkedCamera?.name || 'Main Entrance Camera'}
+                  </span>
+                  <span className="text-[11px] text-zinc-500 block mt-0.5">
+                    Zone: {incident.location_zone || linkedCamera?.location || displayWhere}
+                  </span>
+                </div>
+
+                <div className="rounded-xl bg-white/90 border border-red-200/80 p-3">
+                  <span className="text-zinc-500 block mb-1">Camera Stream Status</span>
+                  <div className="flex items-center gap-2">
+                    <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                    <span className="font-bold text-emerald-700">Online & Transmitting</span>
+                  </div>
+                  <span className="text-[11px] text-zinc-500 block mt-0.5">
+                    Device communicating normally
+                  </span>
+                </div>
+
+                <div className="rounded-xl bg-white/90 border border-red-200/80 p-3">
+                  <span className="text-zinc-500 block mb-1">Obstruction First Detected</span>
+                  <span className="font-mono text-zinc-900 font-semibold">
+                    {new Date(incident.started_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                  </span>
+                  <span className="text-[11px] text-zinc-500 block mt-0.5">
+                    Triggered 30s verification protocol
+                  </span>
+                </div>
+
+                <div className="rounded-xl bg-white/90 border border-red-200/80 p-3">
+                  <span className="text-zinc-500 block mb-1">Verification Completed</span>
+                  <span className="font-mono text-red-700 font-semibold">
+                    {new Date(incident.verification_completed_at || incident.created_at || incident.started_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                  </span>
+                  <span className="text-[11px] text-zinc-500 block mt-0.5">
+                    30 seconds continuous blockage confirmed
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* AI Explanation Callout */}
           <div className="rounded-2xl border border-zinc-200 bg-zinc-900 text-white p-5 shadow-xs">
             <div className="flex items-center gap-2 text-amber-400 font-bold text-xs uppercase tracking-wider mb-2">
@@ -289,7 +342,9 @@ export const IncidentDetailPage: React.FC<IncidentDetailPageProps> = ({
             </div>
             <p className="text-sm text-zinc-200 leading-relaxed font-sans">
               {incident.ai_explanation ||
-                'An unknown visitor approached the front entrance and was observed dwelling near the porch. Facial embeddings do not match any enrolled family or trusted member. Verification is recommended.'}
+                (incident.type === 'camera_tampering'
+                  ? 'Main Entrance Camera view remained continuously obstructed for 30 consecutive seconds while connection remained online. Physical lens covering or obstruction confirmed.'
+                  : 'An unknown visitor approached the front entrance and was observed dwelling near the porch. Facial embeddings do not match any enrolled family or trusted member. Verification is recommended.')}
             </p>
           </div>
 

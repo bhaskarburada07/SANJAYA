@@ -2,6 +2,8 @@ import { Detection, Incident, AppNotification, TrustedPerson, SecurityMode, Zone
 import { realtimeBus } from '../lib/supabase';
 import { playDoorbellChime, playUnknownAlertTone } from '../utils/audio';
 import { IntelligenceEngine } from './intelligenceEngine';
+import { SanjayaDecisionSystem, PREDEFINED_SCENARIOS } from './decisionSystem';
+
 
 // Curated realistic snapshots for simulated video feeds
 const UNKNOWN_SNAPSHOTS = [
@@ -205,30 +207,44 @@ export class CVSimulatorService {
       ],
     };
 
+    const isHighOrCritical = evalResult.risk_level === 'HIGH' || evalResult.risk_level === 'CRITICAL';
+    const isWarnOrAbove = evalResult.decision === 'WARN' || evalResult.decision === 'ESCALATE' || evalResult.decision === 'EMERGENCY_RESPONSE';
+
     const notification: AppNotification = {
       id: `notif-${Date.now()}-${entropy}`,
       user_id: userId,
       type: 'security',
       category: 'security',
-      title: `Unknown person (${evalResult.risk_level} Risk)`,
-      message: `${zoneName}: Unrecognized person detected. Dwell: ${dwellSeconds}s. Tap to inspect.`,
+      title: evalResult.decision === 'OBSERVE'
+        ? `Visitor Observed at ${zoneName}`
+        : evalResult.decision === 'INFORM'
+        ? `Visitor Activity: ${zoneName}`
+        : `Unknown Person (${evalResult.risk_level} Risk)`,
+      message: evalResult.ai_explanation,
       read: false,
       created_at: now.toISOString(),
       metadata: { detection_id: detection.id, incident_id: incident.id, zone: zoneName, risk_level: evalResult.risk_level },
     };
 
-    if (playAudio) {
+    if (playAudio && isWarnOrAbove) {
       playUnknownAlertTone();
     }
 
-    // Broadcast
+    // Broadcast according to decision level
     realtimeBus.publish('detections:new', detection);
-    realtimeBus.publish('incidents:new', incident);
-    realtimeBus.publish('notifications:new', notification);
-    realtimeBus.publish('alert:unknown', { detection, incident });
+
+    if (isWarnOrAbove) {
+      realtimeBus.publish('incidents:new', incident);
+      realtimeBus.publish('notifications:new', notification);
+      realtimeBus.publish('alert:unknown', { detection, incident });
+    } else if (evalResult.decision === 'INFORM') {
+      realtimeBus.publish('notifications:new', notification);
+    }
+    // For 'OBSERVE': silent observation, no disruptive alert modal
 
     return { detection, incident, notification };
   }
+
 
   /**
    * Generates a package delivery detection
@@ -330,4 +346,37 @@ export class CVSimulatorService {
     };
     realtimeBus.publish('notifications:new', notif);
   }
+
+  /**
+   * Runs an end-to-end predefined Scenario (A, B, C, D, E, F)
+   */
+  static runPredefinedScenario(
+    scenarioCode: 'A' | 'B' | 'C' | 'D' | 'E' | 'F',
+    userId: string,
+    homeId: string,
+    ctx: {
+      cameras: Camera[];
+      zones: Zone[];
+      trustedPeople: TrustedPerson[];
+      sensors: any[];
+    }
+  ) {
+    const scenario = PREDEFINED_SCENARIOS.find(s => s.code === scenarioCode);
+    if (!scenario) return null;
+
+    const observationInput = scenario.inputGenerator(ctx);
+    const result = SanjayaDecisionSystem.processObservation(userId, homeId, observationInput, {
+      playAudio: true,
+    });
+
+    if (result.detection) {
+      realtimeBus.publish('detections:new', result.detection);
+    }
+    if (result.incident && (result.execution.decision.decision === 'WARN' || result.execution.decision.decision === 'ESCALATE' || result.execution.decision.decision === 'EMERGENCY_RESPONSE')) {
+      realtimeBus.publish('alert:unknown', { detection: result.detection!, incident: result.incident });
+    }
+
+    return result;
+  }
 }
+

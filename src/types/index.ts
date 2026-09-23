@@ -1,7 +1,17 @@
 export type PersonType = 'known' | 'unknown';
-export type IncidentType = 'unknown_detection' | 'sos_activated' | 'manual_alarm' | 'unusual_behaviour' | 'restricted_zone_entry' | 'device_tamper';
+export type IncidentType = 'unknown_detection' | 'sos_activated' | 'manual_alarm' | 'unusual_behaviour' | 'restricted_zone_entry' | 'device_tamper' | 'camera_tampering';
 export type IncidentStatus = 'active' | 'escalated' | 'cancelled' | 'resolved';
 export type CameraStatus = 'online' | 'offline' | 'disabled' | 'tampered';
+export type CameraViewStatus = 'normal' | 'possible_obstruction' | 'obstructed_confirmed';
+
+export interface CameraObstructionVerification {
+  isObstructed: boolean;
+  verificationStartTime: string; // ISO string when first detected
+  verificationExpiresAt: number; // epoch ms when 30s timer ends
+  remainingSeconds: number; // 30 down to 0
+  obstructionType?: 'lens_covered' | 'dust_dirt' | 'physical_block' | 'spray_blur' | 'heavy_blur';
+  details?: string;
+}
 export type NotificationType = 'security' | 'system' | 'emergency';
 
 export type SecurityMode = 'home' | 'away' | 'night';
@@ -60,11 +70,16 @@ export interface Camera {
   brand?: string;
   camera_type?: 'dome' | 'bullet' | 'doorbell' | 'ptz';
   connection_type?: 'wifi' | 'onvif' | 'rtsp' | 'sanjaya_cam';
+  description?: string;
   stream_url?: string;
   status: CameraStatus;
   is_simulation: boolean;
   is_tampered?: boolean;
   tamper_reason?: string;
+  view_status?: CameraViewStatus;
+  obstruction_verification?: CameraObstructionVerification;
+  obstruction_detected_at?: string;
+  obstruction_confirmed_at?: string;
   siren_active?: boolean;
   spotlight_active?: boolean;
   is_recording?: boolean;
@@ -164,6 +179,8 @@ export interface Incident {
   detection_id?: string;
   detection?: Detection;
   camera_id?: string;
+  camera_name?: string;
+  location_zone?: string;
   person_id?: string;
   type: IncidentType;
   status: IncidentStatus;
@@ -173,6 +190,8 @@ export interface Incident {
   notes?: string;
   started_at: string;
   resolved_at?: string;
+  verification_completed_at?: string;
+  created_at?: string;
   timeline: IncidentTimelineEvent[];
   // Intelligence Extensions
   risk_level?: RiskLevel;

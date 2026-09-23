@@ -140,6 +140,140 @@ export interface DailyAISummary {
   };
 }
 
+export type DecisionType = 'OBSERVE' | 'INFORM' | 'WARN' | 'ESCALATE' | 'EMERGENCY_RESPONSE';
+
+export type MovementType = 
+  | 'walking_past' 
+  | 'approaching' 
+  | 'waiting' 
+  | 'pacing' 
+  | 'loitering' 
+  | 'leaving' 
+  | 'returning' 
+  | 'stationary';
+
+export interface BehaviourContext {
+  movement: MovementType;
+  dwellTimeSeconds: number;
+  doorInteraction: boolean;
+  windowInteraction: boolean;
+  restrictedZoneEntry: boolean;
+  repeatedApproachesCount: number;
+  isNightActivity: boolean;
+  isAbnormal: boolean;
+  tags: string[];
+}
+
+export interface SensorFusionContext {
+  pirMotionActive: boolean;
+  doorSensorState: 'closed' | 'open' | 'tamper' | 'none';
+  windowSensorState: 'closed' | 'open' | 'tamper' | 'none';
+  cameraHealthStatus: 'online' | 'offline' | 'tampered' | 'obstructed';
+  otherSensorsTriggered: string[];
+  crossCameraTrackId?: string;
+}
+
+export interface MultiSourceContext {
+  identity: {
+    isKnown: boolean;
+    personId?: string;
+    personName?: string;
+    relationship?: string;
+    isRestricted?: boolean;
+    confidence: number;
+    rawEmbeddingMatch: boolean;
+  };
+  camera: {
+    id: string;
+    name: string;
+    location: string;
+    status: string;
+    isSimulation: boolean;
+  };
+  zone: {
+    id: string;
+    name: string;
+    sensitivity: 'low' | 'medium' | 'high';
+    type: string;
+    isMonitored: boolean;
+  };
+  securityMode: SecurityMode;
+  homeownerStatus: 'home' | 'away';
+  timeOfDay: {
+    hour: number;
+    isNight: boolean;
+    period: 'morning' | 'day' | 'evening' | 'late_night';
+  };
+  behaviour: BehaviourContext;
+  sensorFusion: SensorFusionContext;
+  crossCameraPath: Array<{
+    cameraId: string;
+    cameraName: string;
+    zoneName: string;
+    timestamp: string;
+    dwellSeconds?: number;
+  }>;
+  historyCorrelation: {
+    previousIncidentsCount: number;
+    repeatedVisitorToday: boolean;
+    lastSeenSecondsAgo?: number;
+  };
+  falsePositiveCheck: {
+    isPotentialShadowOrLighting: boolean;
+    isDeliveryParcel: boolean;
+    isSingleFrame: boolean;
+    passedFilter: boolean;
+  };
+}
+
+export interface RiskEngineOutput {
+  calculatedRisk: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  riskScore: number; // 0 - 100
+  trend: 'increasing' | 'stable' | 'decreasing';
+  riskFactors: string[];
+  mitigatingFactors: string[];
+  reasoning: string;
+}
+
+export interface DecisionEngineOutput {
+  decision: DecisionType;
+  confidence: number;
+  decisionRationale: string;
+  explainableReasons: string[];
+  recommendedActions: string[];
+  requiresHumanConfirmation: boolean;
+}
+
+export interface ResponseEngineOutput {
+  actionsDispatched: string[];
+  notificationCreated?: AINotification;
+  incidentAction: 'none' | 'created' | 'updated';
+  incidentId?: string;
+  sosTriggered: boolean;
+  alertTonePlayed: boolean;
+  audioDeterrentActive: boolean;
+  timelineEntryCreated: boolean;
+  summaryText: string;
+}
+
+export interface DecisionPipelineExecution {
+  id: string;
+  timestamp: string;
+  context: MultiSourceContext;
+  risk: RiskEngineOutput;
+  decision: DecisionEngineOutput;
+  response: ResponseEngineOutput;
+  stages: {
+    see: string;
+    understand: string;
+    context: string;
+    risk: string;
+    decide: string;
+    respond: string;
+    remember: string;
+  };
+}
+
 export interface AIBrainState {
   status: AIBrainStatus;
   events: SecurityEvent[];
@@ -148,4 +282,6 @@ export interface AIBrainState {
   notifications: AINotification[];
   conversation: AIConversationMessage[];
   dailySummary: DailyAISummary;
+  recentDecisions?: DecisionPipelineExecution[];
 }
+
